@@ -15,25 +15,7 @@ import (
 )
 
 const DBConnStr = "host=localhost port=5432 user=postgres password=mysecretpassword sslmode=disable dbname=example"
-const UpdataSQL = `UPDATE users SET name = 'Bob' WHERE id = 1`
-
-func failIfError(t *testing.T, err error) {
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func assertErrIsNil(t *testing.T, err error) {
-	if err != nil {
-		t.Errorf("expected nil, but got %v", err)
-	}
-}
-
-func assertErrIsTarget(t *testing.T, err error, target error) {
-	if !errors.Is(err, target) {
-		t.Errorf("expected %v, but got %v", target, err)
-	}
-}
+const UpdateSQL = `UPDATE users SET name = 'Bob' WHERE id = 1`
 
 func TestRollbackInDefer_stdlib(t *testing.T) {
 	tests := []struct {
@@ -68,7 +50,7 @@ func TestRollbackInDefer_stdlib(t *testing.T) {
 				tt.wantErr(t, err)
 			}()
 
-			_, err = tx.Exec(UpdataSQL)
+			_, err = tx.Exec(UpdateSQL)
 			failIfError(t, err)
 
 			if tt.commit {
@@ -113,7 +95,7 @@ func TestRollbackInDefer_pgx(t *testing.T) {
 				tt.wantErr(t, err)
 			}()
 
-			_, err = tx.Exec(ctx, UpdataSQL)
+			_, err = tx.Exec(ctx, UpdateSQL)
 			failIfError(t, err)
 
 			if tt.commit {
@@ -125,10 +107,12 @@ func TestRollbackInDefer_pgx(t *testing.T) {
 }
 
 func TestRollbackInDefer_gorm1_pq(t *testing.T) {
+	// gorm v1 + pq
 	testRollbackInDeferGorm1(t, "postgres")
 }
 
 func TestRollbackInDefer_gorm1_pgx(t *testing.T) {
+	// gorm v1 + pgx
 	// `pgx` is not officially supported, running under compatibility mode.
 	testRollbackInDeferGorm1(t, "pgx")
 }
@@ -166,7 +150,7 @@ func testRollbackInDeferGorm1(t *testing.T, dialect string) {
 				tt.wantErr(t, err)
 			}()
 
-			err = tx.Exec(UpdataSQL).Error
+			err = tx.Exec(UpdateSQL).Error
 			failIfError(t, err)
 
 			if tt.commit {
@@ -174,5 +158,23 @@ func testRollbackInDeferGorm1(t *testing.T, dialect string) {
 				failIfError(t, err)
 			}
 		})
+	}
+}
+
+func failIfError(t *testing.T, err error) {
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertErrIsNil(t *testing.T, err error) {
+	if err != nil {
+		t.Errorf("expected nil, but got %v", err)
+	}
+}
+
+func assertErrIsTarget(t *testing.T, err error, target error) {
+	if !errors.Is(err, target) {
+		t.Errorf("expected %v, but got %v", target, err)
 	}
 }
