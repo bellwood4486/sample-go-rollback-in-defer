@@ -6,12 +6,15 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jinzhu/gorm"
+
 	"github.com/jackc/pgx/v5"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq"
 )
 
-const DATABASEURL = "postgres://postgres:mysecretpassword@localhost:5432/example"
+const DBConnStr = "host=localhost port=5432 user=postgres password=mysecretpassword sslmode=disable dbname=example"
 const UpdataSQL = `UPDATE users SET name = 'Bob' WHERE id = 1`
 
 func failIfError(t *testing.T, err error) {
@@ -39,7 +42,7 @@ func TestRollbackInDefer_stdlib(t *testing.T) {
 		wantErr func(*testing.T, error)
 	}{
 		{
-			name:   "commit",
+			name:   "committed",
 			commit: true,
 			wantErr: func(t *testing.T, err error) {
 				assertErrIsTarget(t, err, sql.ErrTxDone)
@@ -52,7 +55,7 @@ func TestRollbackInDefer_stdlib(t *testing.T) {
 		},
 	}
 
-	db, err := sql.Open("pgx", DATABASEURL)
+	db, err := sql.Open("pgx", DBConnStr)
 	failIfError(t, err)
 	defer db.Close()
 
@@ -83,10 +86,10 @@ func TestRollbackInDefer_pgx(t *testing.T) {
 		wantErr func(*testing.T, error)
 	}{
 		{
-			name:   "commit",
+			name:   "committed",
 			commit: true,
 			wantErr: func(t *testing.T, err error) {
-				assertErrIsTarget(t, err, pgx.ErrTxClosed)
+				assertErrIsTarget(t, err, pgx.ErrTxClosed) // 自前のエラーオブジェクトと比較する必要あり
 			},
 		},
 		{
@@ -97,7 +100,7 @@ func TestRollbackInDefer_pgx(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, DATABASEURL)
+	conn, err := pgx.Connect(ctx, DBConnStr)
 	failIfError(t, err)
 	defer conn.Close(ctx)
 
@@ -115,6 +118,59 @@ func TestRollbackInDefer_pgx(t *testing.T) {
 
 			if tt.commit {
 				err = tx.Commit(ctx)
+				failIfError(t, err)
+			}
+		})
+	}
+}
+
+func TestRollbackInDefer_gorm1_pq(t *testing.T) {
+	testRollbackInDeferGorm1(t, "postgres")
+}
+
+func TestRollbackInDefer_gorm1_pgx(t *testing.T) {
+	// `pgx` is not officially supported, running under compatibility mode.
+	testRollbackInDeferGorm1(t, "pgx")
+}
+
+func testRollbackInDeferGorm1(t *testing.T, dialect string) {
+	tests := []struct {
+		name    string
+		commit  bool
+		wantErr func(*testing.T, error)
+	}{
+		{
+			name:   "committed",
+			commit: true,
+			// 他と異なりエラーは返らない。
+			// sql.ErrTxDone 以外ならエラーとして返す実装になっているため。
+			// See: https://github.com/jinzhu/gorm/blob/master/main.go#L596
+			wantErr: assertErrIsNil,
+		},
+		{
+			name:    "no commit",
+			commit:  false,
+			wantErr: assertErrIsNil,
+		},
+	}
+
+	db, err := gorm.Open(dialect, DBConnStr)
+	failIfError(t, err)
+	defer db.Close()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := db.Begin()
+			defer func() {
+				err := tx.Rollback().Error
+				tt.wantErr(t, err)
+			}()
+
+			err = tx.Exec(UpdataSQL).Error
+			failIfError(t, err)
+
+			if tt.commit {
+				err := tx.Commit().Error
 				failIfError(t, err)
 			}
 		})
